@@ -1,0 +1,22 @@
+{
+  "name": "llavero-svg",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Convierte imagenes en SVG de line-art para llaveros 3D usando Gemini",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "imagetracerjs": "^1.2.6",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.3.4",
+    "vite": "^6.0.7",
+    "vite-plugin-pwa": "^0.21.1"
+  }
+}
