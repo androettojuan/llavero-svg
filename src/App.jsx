@@ -19,6 +19,10 @@ export default function App() {
   const [detail, setDetail] = useState(60);
   const [numColors, setNumColors] = useState(4);
 
+  // Parametros del modelo 3D (se usaran en etapas siguientes).
+  const [baseMm, setBaseMm] = useState(1); // altura de la base solida
+  const [stepMm, setStepMm] = useState(0.2); // alto extra por capa de color
+
   const [status, setStatus] = useState("idle"); // idle | generating | vectorizing
   const [error, setError] = useState("");
   const fileInput = useRef(null);
@@ -84,6 +88,17 @@ export default function App() {
     } finally {
       setStatus("idle");
     }
+  }
+
+  // Reordenar un color en la pila (dir: -1 sube hacia la base, +1 baja al tope).
+  function moveColor(index, dir) {
+    setPalette((prev) => {
+      const j = index + dir;
+      if (j < 0 || j >= prev.length) return prev;
+      const next = [...prev];
+      [next[index], next[j]] = [next[j], next[index]];
+      return next;
+    });
   }
 
   function downloadSvg() {
@@ -194,22 +209,75 @@ export default function App() {
               SVG actual sin volver a llamar a Gemini.
             </small>
 
-            {palette.length > 0 && (
-              <div className="palette">
-                <span className="palette-label">Paleta detectada</span>
-                <div className="swatches">
-                  {palette.map((c) => (
-                    <span
-                      key={c}
-                      className="swatch"
-                      style={{ background: c }}
-                      title={c}
-                    />
-                  ))}
-                </div>
-              </div>
-            )}
           </div>
+
+          {palette.length > 0 && (
+            <>
+              <h2>4. Capas de color</h2>
+              <div className="field">
+                <div className="dims">
+                  <label className="num">
+                    <span>Base (mm)</span>
+                    <input
+                      type="number"
+                      min="0.2"
+                      step="0.1"
+                      value={baseMm}
+                      onChange={(e) => setBaseMm(Number(e.target.value))}
+                    />
+                  </label>
+                  <label className="num">
+                    <span>Paso por capa (mm)</span>
+                    <input
+                      type="number"
+                      min="0.05"
+                      step="0.05"
+                      value={stepMm}
+                      onChange={(e) => setStepMm(Number(e.target.value))}
+                    />
+                  </label>
+                </div>
+
+                <span className="palette-label">
+                  Orden de apilado (1 = capa más baja, sobre la base)
+                </span>
+                <ul className="color-list">
+                  {palette.map((c, i) => (
+                    <li key={c} className="color-row">
+                      <span className="layer-index">{i + 1}</span>
+                      <span className="swatch" style={{ background: c }} title={c} />
+                      <code className="hex">{c}</code>
+                      <span className="layer-h">
+                        {(baseMm + (i + 1) * stepMm).toFixed(2)} mm
+                      </span>
+                      <span className="move-btns">
+                        <button
+                          className="ghost"
+                          disabled={i === 0}
+                          onClick={() => moveColor(i, -1)}
+                          title="Subir hacia la base"
+                        >
+                          ↑
+                        </button>
+                        <button
+                          className="ghost"
+                          disabled={i === palette.length - 1}
+                          onClick={() => moveColor(i, 1)}
+                          title="Bajar hacia el tope"
+                        >
+                          ↓
+                        </button>
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+                <small>
+                  Altura total ≈ {(baseMm + palette.length * stepMm).toFixed(2)} mm
+                  (base {baseMm} mm + {palette.length} capas).
+                </small>
+              </div>
+            </>
+          )}
 
           <div className="actions">
             <button
