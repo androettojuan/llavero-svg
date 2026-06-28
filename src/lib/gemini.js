@@ -1,4 +1,4 @@
-// Cliente minimo para la API de Gemini (generacion de imagen line-art).
+// Cliente minimo para la API de Gemini (generacion de arte multicolor plano).
 // La key se guarda en localStorage y se llama directo desde el navegador.
 
 const API_BASE = "https://generativelanguage.googleapis.com/v1beta/models";
@@ -6,23 +6,17 @@ const API_BASE = "https://generativelanguage.googleapis.com/v1beta/models";
 // Modelo de generacion de imagen ("Nano Banana"). Configurable desde Ajustes.
 export const DEFAULT_MODEL = "gemini-2.5-flash-image";
 
-function buildPrompt({ thickness }) {
-  const grosor =
-    thickness === "fino"
-      ? "lineas finas"
-      : thickness === "grueso"
-        ? "lineas gruesas y bien marcadas"
-        : "lineas de grosor medio";
-
+function buildPrompt({ colors = 4 }) {
   return [
-    "Convierte esta imagen en un dibujo de line-art en blanco y negro,",
-    "pensado para fabricar un llavero 3D.",
+    `Convierte esta imagen en una ilustracion de colores planos con exactamente ${colors} colores solidos,`,
+    "pensada para fabricar un llavero 3D multicolor por capas.",
     "Reglas estrictas:",
-    "- Solo contornos negros sobre fondo blanco puro.",
-    "- Sin sombras, sin grises, sin relleno de color, sin degradados.",
-    `- Contornos limpios, continuos y cerrados, con ${grosor}.`,
-    "- Manten las formas y el texto principal reconocibles.",
-    "- Centra el dibujo con un pequeno margen alrededor.",
+    `- Usa como maximo ${colors} colores planos y bien diferenciados.`,
+    "- Sin degradados, sin sombras suaves, sin texturas, sin ruido.",
+    "- Regiones de color amplias, limpias y bien delimitadas (sin antialiasing exagerado).",
+    "- Contornos cerrados; evita detalles diminutos que no se puedan imprimir.",
+    "- Fondo de un color plano uniforme (blanco puro si es posible).",
+    "- Manten las formas y el texto principal reconocibles, centrado y con un pequeno margen.",
     "Devuelve unicamente la imagen resultante.",
   ].join(" ");
 }
@@ -42,10 +36,10 @@ function fileToBase64(file) {
 }
 
 /**
- * Llama a Gemini para generar el line-art.
- * @returns {Promise<string>} dataURL (image/png) del line-art.
+ * Llama a Gemini para generar el arte de colores planos.
+ * @returns {Promise<string>} dataURL (image/png) del arte multicolor.
  */
-export async function generateLineArt({ apiKey, model, file, thickness }) {
+export async function generateColorArt({ apiKey, model, file, colors = 4 }) {
   if (!apiKey) throw new Error("Falta la API key de Gemini.");
   if (!file) throw new Error("No hay imagen para procesar.");
 
@@ -57,7 +51,7 @@ export async function generateLineArt({ apiKey, model, file, thickness }) {
       {
         role: "user",
         parts: [
-          { text: buildPrompt({ thickness }) },
+          { text: buildPrompt({ colors }) },
           {
             inline_data: {
               mime_type: file.type || "image/png",

@@ -1,28 +1,27 @@
-// Vectorizacion del line-art (PNG -> SVG) usando ImageTracer en el navegador.
+// Vectorizacion del arte multicolor (PNG -> SVG) usando ImageTracer en el navegador.
+// A diferencia de la version line-art (blanco/negro), aca cuantizamos la imagen a
+// N colores planos y devolvemos tambien la paleta detectada, base para el 3MF.
 import ImageTracer from "imagetracerjs";
 
-// Paleta forzada a blanco/negro para obtener contornos limpios.
-const BW_PALETTE = [
-  { r: 0, g: 0, b: 0, a: 255 },
-  { r: 255, g: 255, b: 255, a: 255 },
-];
-
 /**
- * Convierte un dataURL de imagen a SVG.
- * @param {string} dataUrl  imagen (line-art) en dataURL.
+ * Convierte un dataURL de imagen a SVG multicolor.
+ * @param {string} dataUrl  imagen en dataURL.
  * @param {object} opts
- * @param {number} opts.detail  0..100 (mas alto = mas detalle).
- * @returns {Promise<string>} contenido SVG.
+ * @param {number} opts.detail   0..100 (mas alto = mas detalle).
+ * @param {number} opts.colors   cantidad de colores a cuantizar (2..8).
+ * @returns {Promise<{svg: string, palette: string[]}>}
  */
-export function vectorize(dataUrl, { detail = 60 } = {}) {
+export function vectorize(dataUrl, { detail = 60, colors = 4 } = {}) {
   // Mapear "detalle" a parametros de ImageTracer.
   // Mas detalle => menos simplificacion (pathomit bajo, ltres/qtres bajos).
   const d = Math.min(100, Math.max(0, detail)) / 100;
+  const numColors = Math.min(8, Math.max(2, Math.round(colors)));
   const options = {
-    // Paleta fija blanco/negro.
-    palette: BW_PALETTE,
-    colorsampling: 0,
-    numberofcolors: 2,
+    // Cuantizacion de color: que ImageTracer elija la paleta optima.
+    colorsampling: 2,
+    numberofcolors: numColors,
+    mincolorratio: 0,
+    colorquantcycles: 3,
     // Simplificacion: a mayor detalle, menores umbrales.
     ltres: 0.1 + (1 - d) * 2.4, // 0.1 .. 2.5
     qtres: 0.1 + (1 - d) * 2.4,
@@ -41,19 +40,31 @@ export function vectorize(dataUrl, { detail = 60 } = {}) {
 
   return new Promise((resolve, reject) => {
     try {
-      ImageTracer.imageToSVG(dataUrl, (svg) => resolve(cleanupSvg(svg)), options);
+      ImageTracer.imageToSVG(
+        dataUrl,
+        (svg) => resolve({ svg, palette: extractPalette(svg) }),
+        options
+      );
     } catch (e) {
       reject(e);
     }
   });
 }
 
-// Quita los paths blancos (fondo) para dejar solo el contorno negro,
-// util para importar a software 3D.
-function cleanupSvg(svg) {
-  // ImageTracer genera <path fill="rgb(255,255,255)" .../> para el fondo.
-  return svg.replace(
-    /<path[^>]*fill="rgb\(255,255,255\)"[^>]*\/>/g,
-    ""
-  );
+// Extrae los colores unicos (fill) presentes en el SVG, en orden de aparicion.
+// Devuelve hex normalizados (#rrggbb).
+function extractPalette(svg) {
+  const seen = new Map();
+  const re = /fill="rgb\((\d+),(\d+),(\d+)\)"/g;
+  let m;
+  while ((m = re.exec(svg)) !== null) {
+    const hex = rgbToHex(+m[1], +m[2], +m[3]);
+    seen.set(hex, (seen.get(hex) || 0) + 1);
+  }
+  return Array.from(seen.keys());
+}
+
+function rgbToHex(r, g, b) {
+  const h = (n) => n.toString(16).padStart(2, "0");
+  return `#${h(r)}${h(g)}${h(b)}`;
 }

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { generateLineArt, DEFAULT_MODEL } from "./lib/gemini.js";
+import { generateColorArt, DEFAULT_MODEL } from "./lib/gemini.js";
 import { vectorize } from "./lib/vectorize.js";
 
 const LS_KEY = "gemini_api_key";
@@ -12,11 +12,12 @@ export default function App() {
 
   const [file, setFile] = useState(null);
   const [sourceUrl, setSourceUrl] = useState("");
-  const [lineArtUrl, setLineArtUrl] = useState("");
+  const [artUrl, setArtUrl] = useState("");
   const [svg, setSvg] = useState("");
+  const [palette, setPalette] = useState([]);
 
   const [detail, setDetail] = useState(60);
-  const [thickness, setThickness] = useState("medio");
+  const [numColors, setNumColors] = useState(4);
 
   const [status, setStatus] = useState("idle"); // idle | generating | vectorizing
   const [error, setError] = useState("");
@@ -42,22 +43,25 @@ export default function App() {
     if (!f) return;
     setFile(f);
     setSourceUrl(URL.createObjectURL(f));
-    setLineArtUrl("");
+    setArtUrl("");
     setSvg("");
+    setPalette([]);
     setError("");
   }
 
   async function handleGenerate() {
     setError("");
     setSvg("");
+    setPalette([]);
     try {
       setStatus("generating");
-      const art = await generateLineArt({ apiKey, model, file, thickness });
-      setLineArtUrl(art);
+      const art = await generateColorArt({ apiKey, model, file, colors: numColors });
+      setArtUrl(art);
 
       setStatus("vectorizing");
-      const out = await vectorize(art, { detail });
-      setSvg(out);
+      const out = await vectorize(art, { detail, colors: numColors });
+      setSvg(out.svg);
+      setPalette(out.palette);
     } catch (e) {
       setError(e.message || String(e));
     } finally {
@@ -65,14 +69,16 @@ export default function App() {
     }
   }
 
-  // Re-vectorizar cuando cambia el detalle (si ya hay line-art).
-  async function reVectorize(newDetail) {
+  // Re-vectorizar (barato, sin Gemini) cuando cambian detalle o cantidad de colores.
+  async function reVectorize({ newDetail = detail, newColors = numColors } = {}) {
     setDetail(newDetail);
-    if (!lineArtUrl) return;
+    setNumColors(newColors);
+    if (!artUrl) return;
     try {
       setStatus("vectorizing");
-      const out = await vectorize(lineArtUrl, { detail: newDetail });
-      setSvg(out);
+      const out = await vectorize(artUrl, { detail: newDetail, colors: newColors });
+      setSvg(out.svg);
+      setPalette(out.palette);
     } catch (e) {
       setError(e.message || String(e));
     } finally {
@@ -101,7 +107,7 @@ export default function App() {
           <span className="logo">◈</span>
           <div>
             <h1>Llavero SVG Studio</h1>
-            <p>Imagen → line-art (Gemini) → SVG vectorial</p>
+            <p>Imagen → arte a color (Gemini) → SVG multicolor</p>
           </div>
         </div>
       </header>
@@ -167,19 +173,42 @@ export default function App() {
                 min="0"
                 max="100"
                 value={detail}
-                onChange={(e) => reVectorize(Number(e.target.value))}
+                onChange={(e) => reVectorize({ newDetail: Number(e.target.value) })}
               />
             </label>
 
-            <label className="select">
-              <span>Grosor de línea</span>
-              <select value={thickness} onChange={(e) => setThickness(e.target.value)}>
-                <option value="fino">Fino</option>
-                <option value="medio">Medio</option>
-                <option value="grueso">Grueso</option>
-              </select>
+            <label className="slider">
+              <span>
+                Colores <b>{numColors}</b>
+              </span>
+              <input
+                type="range"
+                min="2"
+                max="8"
+                value={numColors}
+                onChange={(e) => reVectorize({ newColors: Number(e.target.value) })}
+              />
             </label>
-            <small>El grosor se aplica al regenerar el line-art con Gemini.</small>
+            <small>
+              La cantidad se pide a Gemini al generar; moverla acá recuantiza el
+              SVG actual sin volver a llamar a Gemini.
+            </small>
+
+            {palette.length > 0 && (
+              <div className="palette">
+                <span className="palette-label">Paleta detectada</span>
+                <div className="swatches">
+                  {palette.map((c) => (
+                    <span
+                      key={c}
+                      className="swatch"
+                      style={{ background: c }}
+                      title={c}
+                    />
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
 
           <div className="actions">
@@ -189,7 +218,7 @@ export default function App() {
               disabled={!apiKey || !file || busy}
             >
               {status === "generating"
-                ? "Generando line-art…"
+                ? "Generando arte…"
                 : status === "vectorizing"
                   ? "Vectorizando…"
                   : "Generar SVG"}
@@ -207,10 +236,10 @@ export default function App() {
           <Preview title="Original" empty="Subí una imagen">
             {sourceUrl && <img src={sourceUrl} alt="original" />}
           </Preview>
-          <Preview title="Line-art (Gemini)" empty="Se genera al procesar">
-            {lineArtUrl && <img src={lineArtUrl} alt="line art" />}
+          <Preview title="Arte a color (Gemini)" empty="Se genera al procesar">
+            {artUrl && <img src={artUrl} alt="arte a color" />}
           </Preview>
-          <Preview title="SVG vectorial" empty="Resultado final" wide>
+          <Preview title="SVG multicolor" empty="Resultado final" wide>
             {svg && (
               <div className="svg-box" dangerouslySetInnerHTML={{ __html: svg }} />
             )}

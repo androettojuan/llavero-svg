@@ -267,3 +267,30 @@ input[type="range"] {
   color: #94a3b8;
   font-size: 13px;
 }
+
+/* Paleta de colores detectada (Etapa 1 del feature 3MF). */
+.palette {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.palette-label {
+  font-size: 13px;
+  color: #94a3b8;
+}
+
+.swatches {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.swatch {
+  width: 26px;
+  height: 26px;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.2);
+}
