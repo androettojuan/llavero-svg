@@ -114,7 +114,7 @@ export default function App() {
             <div className="key-row">
               <input
                 type={showKey ? "text" : "password"}
-                placeholder="AIza..."
+                placeholder="AQ.Ab8..."
                 value={apiKey}
                 onChange={(e) => saveKey(e.target.value)}
                 autoComplete="off"
@@ -128,7 +128,7 @@ export default function App() {
               <a href="https://aistudio.google.com/apikey" target="_blank" rel="noreferrer">
                 Google AI Studio
               </a>
-              .
+              . Requiere facturación habilitada para generar imágenes.
             </small>
             <label className="model-label">
               Modelo
