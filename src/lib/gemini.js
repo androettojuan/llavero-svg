@@ -8,16 +8,20 @@ export const DEFAULT_MODEL = "gemini-2.5-flash-image";
 
 function buildPrompt({ colors = 4 }) {
   return [
-    `Convierte esta imagen en una ilustracion de colores planos con exactamente ${colors} colores solidos,`,
-    "pensada para fabricar un llavero 3D multicolor por capas.",
-    "Reglas estrictas:",
-    `- Usa como maximo ${colors} colores planos y bien diferenciados.`,
-    "- Sin degradados, sin sombras suaves, sin texturas, sin ruido.",
-    "- Regiones de color amplias, limpias y bien delimitadas (sin antialiasing exagerado).",
-    "- Contornos cerrados; evita detalles diminutos que no se puedan imprimir.",
+    `REDIBUJA esta imagen desde cero como una ilustracion vectorial minimalista tipo "flat design", con como maximo ${colors} colores planos solidos.`,
+    "Es para fabricar un llavero 3D multicolor por capas, asi que necesito bloques de color solidos y simples.",
+    "IGNORA por completo el sombreado, las luces y las sombras del original: NO los copies.",
+    "Cada parte del dibujo debe pintarse con UN UNICO color plano y uniforme:",
+    "- el cabello, un solo tono; la piel, un solo tono; cada prenda, un solo color plano; etc.",
+    "Reglas estrictas (OBLIGATORIO):",
+    "- PROHIBIDO sombras, luces, brillos, reflejos, volumen o profundidad.",
+    "- PROHIBIDO degradados, gradientes, texturas, ruido o transparencias parciales.",
+    "- Simplifica al maximo: formas grandes y limpias, la MINIMA cantidad de detalles.",
+    "- Bordes nitidos y contornos cerrados; sin detalles diminutos.",
+    `- En total no mas de ${colors} colores planos en toda la imagen.`,
     "- Fondo de un color plano uniforme (blanco puro si es posible).",
-    "- Manten las formas y el texto principal reconocibles, centrado y con un pequeno margen.",
-    "Devuelve unicamente la imagen resultante.",
+    "- Manten el personaje reconocible, centrado y con un pequeno margen.",
+    "Devuelve unicamente la imagen resultante: colores 100% planos, estilo sticker plano.",
   ].join(" ");
 }
 

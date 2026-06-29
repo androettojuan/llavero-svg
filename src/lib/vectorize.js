@@ -17,12 +17,18 @@ export async function quantizeImage(dataUrl, { colors = 4, smooth = 50, clean = 
   const numColors = Math.min(8, Math.max(2, Math.round(colors)));
 
   const imgData = await loadImageData(dataUrl);
+
+  // Desenfoque previo: fusiona sombras/luces suaves para aplanar las zonas al
+  // cuantizar, sin pasarse (un radio grande mezcla partes distintas).
+  const preBlur = Math.round(s * 4); // 0 .. 4 px
+  if (preBlur > 0) boxBlurRGB(imgData, preBlur, 2);
+
   const { array, palette } = ImageTracer.colorquantization(imgData, {
     colorsampling: 2,
     numberofcolors: numColors,
     mincolorratio: 0,
     colorquantcycles: 3,
-    blurradius: Math.round(s * 5),
+    blurradius: Math.round(s * 3),
     blurdelta: 20,
   });
 
@@ -181,6 +187,51 @@ function extractPalette(svg) {
 function rgbToHex(r, g, b) {
   const h = (n) => n.toString(16).padStart(2, "0");
   return `#${h(r)}${h(g)}${h(b)}`;
+}
+
+// Desenfoque de caja separable (varias pasadas ~= gaussiano). In place, RGB.
+// Solo promedia pixeles opacos para no "sangrar" el fondo transparente.
+function boxBlurRGB(imageData, radius, passes = 2) {
+  const { width: w, height: h, data } = imageData;
+  for (let p = 0; p < passes; p++) {
+    blurPass(data, w, h, radius, true);
+    blurPass(data, w, h, radius, false);
+  }
+}
+
+function blurPass(data, w, h, radius, horizontal) {
+  const len = horizontal ? w : h;
+  const lineCount = horizontal ? h : w;
+  const win = radius * 2 + 1;
+  const tmp = new Float32Array(len * 3);
+  for (let line = 0; line < lineCount; line++) {
+    // Cargar la linea en tmp.
+    for (let i = 0; i < len; i++) {
+      const idx = horizontal ? (line * w + i) * 4 : (i * w + line) * 4;
+      tmp[i * 3] = data[idx];
+      tmp[i * 3 + 1] = data[idx + 1];
+      tmp[i * 3 + 2] = data[idx + 2];
+    }
+    // Promedio movil por canal.
+    let sr = 0, sg = 0, sb = 0;
+    for (let i = -radius; i <= radius; i++) {
+      const k = Math.min(len - 1, Math.max(0, i));
+      sr += tmp[k * 3];
+      sg += tmp[k * 3 + 1];
+      sb += tmp[k * 3 + 2];
+    }
+    for (let i = 0; i < len; i++) {
+      const idx = horizontal ? (line * w + i) * 4 : (i * w + line) * 4;
+      data[idx] = sr / win;
+      data[idx + 1] = sg / win;
+      data[idx + 2] = sb / win;
+      const add = Math.min(len - 1, i + radius + 1);
+      const sub = Math.max(0, i - radius);
+      sr += tmp[add * 3] - tmp[sub * 3];
+      sg += tmp[add * 3 + 1] - tmp[sub * 3 + 1];
+      sb += tmp[add * 3 + 2] - tmp[sub * 3 + 2];
+    }
+  }
 }
 
 function hexToRgb(hex) {
