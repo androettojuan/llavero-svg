@@ -273,20 +273,131 @@ input[type="range"] {
   place-items: center;
 }
 
-.erase-canvas {
-  max-width: 100%;
-  max-height: 420px;
-  display: block;
-  margin: 0 auto;
-  cursor: crosshair;
-  image-rendering: auto;
+.erase-viewport {
+  position: relative;
+  width: 100%;
+  height: 360px;
+  overflow: hidden;
+  border-radius: 10px;
+  cursor: grab;
+  touch-action: none;
   /* fondo a cuadritos para ver lo borrado (transparente) */
   background: repeating-conic-gradient(#ffffff 0% 25%, #e2e2e2 0% 50%) 50% / 20px 20px;
+}
+
+.erase-viewport:active {
+  cursor: grabbing;
+}
+
+.erase-canvas {
+  position: absolute;
+  top: 0;
+  left: 0;
+  transform-origin: 0 0;
+  image-rendering: auto;
 }
 
 .mini {
   font-size: 11px;
   padding: 2px 8px;
+}
+
+.head-actions {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.edit-wrap {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: center;
+}
+
+/* Barra de acciones tras seleccionar una zona. */
+.edit-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 8px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--border);
+}
+
+.edit-bar-label {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.swatch-btn {
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  cursor: pointer;
+  padding: 0;
+}
+
+.swatch-btn.sel {
+  outline: 2px solid #fff;
+  outline-offset: 1px;
+}
+
+.danger {
+  background: #ef4444;
+  color: #fff;
+  border: 1px solid #ef4444;
+}
+
+/* Modal de edicion ampliada. */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.7);
+  display: grid;
+  place-items: center;
+  z-index: 50;
+  padding: 20px;
+}
+
+.modal {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  max-width: 95vw;
+  max-height: 95vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.modal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+}
+
+.modal-body {
+  padding: 14px;
+  overflow: auto;
+  display: grid;
+  place-items: center;
+}
+
+.modal-body .erase-viewport {
+  width: 86vw;
+  height: 76vh;
+}
+
+.modal .edit-bar {
+  margin: 0 14px 14px;
 }
 
 .viewer3d {

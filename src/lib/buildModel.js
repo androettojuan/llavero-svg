@@ -45,7 +45,7 @@ function parseViewBox(svg) {
  */
 export function buildModel(
   svgString,
-  { baseMm = 1, stepMm = 0.2, heightMm = 55, order, exclude = [] } = {}
+  { baseMm = 1, stepMm = 0.2, heightMm = 55, order, exclude = [], ring = null } = {}
 ) {
   const data = new SVGLoader().parse(svgString);
   const { w, h } = parseViewBox(svgString);
@@ -97,12 +97,40 @@ export function buildModel(
   const cy = (box.min.y + box.max.y) / 2;
   for (const l of layers) l.geometry.translate(-cx, -cy, 0);
 
+  const sizeX = box.max.x - box.min.x;
+  const sizeY = box.max.y - box.min.y;
+  const totalH = baseMm + ordered.length * stepMm;
+
+  // Aro del llavero: anillo (con agujero) unido arriba, centrado.
+  if (ring?.enabled && ordered.length) {
+    const outerR = Math.max(1, ring.outer / 2);
+    const holeR = Math.min(Math.max(0.3, ring.hole / 2), outerR - 0.6);
+    const shape = new THREE.Shape();
+    shape.absarc(0, 0, outerR, 0, Math.PI * 2, false);
+    const hole = new THREE.Path();
+    hole.absarc(0, 0, holeR, 0, Math.PI * 2, true);
+    shape.holes.push(hole);
+
+    const ringDepth = ring.thickness > 0 ? ring.thickness : totalH;
+    const ringGeom = new THREE.ExtrudeGeometry(shape, {
+      depth: ringDepth,
+      bevelEnabled: false,
+      steps: 1,
+      curveSegments: 64,
+    });
+    // Colocar arriba, solapando con el cuerpo. (x,y) desplazan desde ahi.
+    const overlap = Math.min(outerR, 4);
+    ringGeom.translate(
+      (ring.x || 0),
+      sizeY / 2 + outerR - overlap + (ring.y || 0),
+      0
+    );
+    ringGeom.computeVertexNormals();
+    layers.push({ color: ring.color || ordered[0], geometry: ringGeom, top: ringDepth });
+  }
+
   return {
     layers,
-    size: {
-      x: (box.max.x - box.min.x),
-      y: (box.max.y - box.min.y),
-      z: box.max.z,
-    },
+    size: { x: sizeX, y: sizeY, z: totalH },
   };
 }

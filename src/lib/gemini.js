@@ -21,52 +21,52 @@ function buildPrompt({ colors = 4 }) {
   ].join(" ");
 }
 
+function buildRefinePrompt({ colors = 4 }) {
+  return [
+    "EDITA esta MISMA imagen. NO la redibujes ni la reinterpretes.",
+    "Es OBLIGATORIO conservar EXACTAMENTE el mismo sujeto, personaje, pose, proporciones,",
+    "composicion y los mismos colores. NO cambies el contenido ni inventes nada nuevo.",
+    "Lo unico que tenes que hacer es limpiar la imagen:",
+    `- Aplana los colores a como maximo ${colors} colores solidos (sin degradados ni sombras).`,
+    "- Elimina manchas, puntos y pixeles sueltos pequenos, sobre todo alrededor de ojos, boca y contornos.",
+    "- Une las regiones del mismo color; bordes limpios, nitidos y continuos.",
+    "- Fondo de un color plano uniforme.",
+    "El resultado debe ser identico al original pero mas limpio. Devuelve unicamente la imagen.",
+  ].join(" ");
+}
+
 // Convierte un File a base64 (sin el prefijo data:).
 function fileToBase64(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
-    reader.onload = () => {
-      const result = reader.result;
-      const base64 = String(result).split(",")[1];
-      resolve(base64);
-    };
+    reader.onload = () => resolve(String(reader.result).split(",")[1]);
     reader.onerror = reject;
     reader.readAsDataURL(file);
   });
 }
 
-/**
- * Llama a Gemini para generar el arte de colores planos.
- * @returns {Promise<string>} dataURL (image/png) del arte multicolor.
- */
-export async function generateColorArt({ apiKey, model, file, colors = 4 }) {
-  if (!apiKey) throw new Error("Falta la API key de Gemini.");
-  if (!file) throw new Error("No hay imagen para procesar.");
+function dataUrlToBase64(dataUrl) {
+  return String(dataUrl).split(",")[1];
+}
 
-  const base64 = await fileToBase64(file);
-  const usedModel = model || DEFAULT_MODEL;
+// Llamada base a Gemini: imagen (base64) + prompt -> dataURL de imagen.
+async function callGemini({ apiKey, model, base64, mimeType = "image/png", prompt }) {
+  if (!apiKey) throw new Error("Falta la API key de Gemini.");
 
   const body = {
     contents: [
       {
         role: "user",
         parts: [
-          { text: buildPrompt({ colors }) },
-          {
-            inline_data: {
-              mime_type: file.type || "image/png",
-              data: base64,
-            },
-          },
+          { text: prompt },
+          { inline_data: { mime_type: mimeType, data: base64 } },
         ],
       },
     ],
-    generationConfig: {
-      responseModalities: ["IMAGE"],
-    },
+    generationConfig: { responseModalities: ["IMAGE"] },
   };
 
-  const url = `${API_BASE}/${usedModel}:generateContent?key=${encodeURIComponent(apiKey)}`;
+  const url = `${API_BASE}/${model || DEFAULT_MODEL}:generateContent?key=${encodeURIComponent(apiKey)}`;
   const res = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -100,4 +100,35 @@ export async function generateColorArt({ apiKey, model, file, colors = 4 }) {
 
   const mime = inline.mimeType || inline.mime_type || "image/png";
   return `data:${mime};base64,${inline.data}`;
+}
+
+/**
+ * 1ra pasada: genera el arte de colores planos a partir del archivo del usuario.
+ * @returns {Promise<string>} dataURL (image/png)
+ */
+export async function generateColorArt({ apiKey, model, file, colors = 4 }) {
+  if (!file) throw new Error("No hay imagen para procesar.");
+  return callGemini({
+    apiKey,
+    model,
+    base64: await fileToBase64(file),
+    mimeType: file.type || "image/png",
+    prompt: buildPrompt({ colors }),
+  });
+}
+
+/**
+ * 2da pasada (refinado): limpia una imagen ya posterizada para quitar manchas
+ * y dejar los colores planos bien definidos.
+ * @returns {Promise<string>} dataURL (image/png)
+ */
+export async function refineColorArt({ apiKey, model, imageDataUrl, colors = 4 }) {
+  if (!imageDataUrl) throw new Error("No hay imagen para refinar.");
+  return callGemini({
+    apiKey,
+    model,
+    base64: dataUrlToBase64(imageDataUrl),
+    mimeType: "image/png",
+    prompt: buildRefinePrompt({ colors }),
+  });
 }

@@ -122,6 +122,29 @@ export function flattenTransparency(dataUrl) {
 
 export const CHROMA_RGB = CHROMA;
 
+// Rasteriza un string SVG a un dataURL PNG del tamano indicado.
+export function svgToPng(svgString, width, height) {
+  return new Promise((resolve, reject) => {
+    const blob = new Blob([svgString], { type: "image/svg+xml" });
+    const url = URL.createObjectURL(blob);
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.createElement("canvas");
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext("2d");
+      ctx.drawImage(img, 0, 0, width, height);
+      URL.revokeObjectURL(url);
+      resolve(canvas.toDataURL("image/png"));
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error("No se pudo rasterizar el SVG."));
+    };
+    img.src = url;
+  });
+}
+
 function hexToRgb(hex) {
   const m = /^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(hex);
   if (!m) return null;

@@ -33,23 +33,28 @@ export async function quantizeImage(dataUrl, { colors = 4, smooth = 50, clean = 
 }
 
 /**
- * Traza el raster a SVG. Los pixeles en `erased` se pintan de magenta (fondo).
+ * Traza el raster a SVG. `edits` es un Map pixel(j*w+i) -> hex | null:
+ *   null = borrar (se pinta de magenta/fondo); hex = reemplazar por ese color.
  * @returns {{svg:string, palette:string[]}}
  */
-export function traceRaster(raster, { detail = 60, smooth = 50, erased = null } = {}) {
+export function traceRaster(raster, { detail = 60, smooth = 50, edits = null } = {}) {
   const { width: w, height: h, array, palette } = raster;
   const d = Math.min(100, Math.max(0, detail)) / 100;
   const s = Math.min(100, Math.max(0, smooth)) / 100;
 
-  const hasErased = erased && erased.size > 0;
-  const tracePal = hasErased ? palette.concat([MAGENTA]) : palette;
+  const hasNull = edits && [...edits.values()].some((v) => v === null);
+  const tracePal = hasNull ? palette.concat([MAGENTA]) : palette;
 
-  // Reconstruir imagen plana desde los indices (magenta en lo borrado).
+  // Reconstruir imagen plana desde los indices, aplicando las ediciones.
   const data = new Uint8ClampedArray(w * h * 4);
   for (let j = 0; j < h; j++) {
     for (let i = 0; i < w; i++) {
       const o = (j * w + i) * 4;
-      const p = hasErased && erased.has(j * w + i) ? MAGENTA : palette[array[j + 1][i + 1]] || MAGENTA;
+      let p;
+      const edit = edits && edits.get(j * w + i);
+      if (edit === null) p = MAGENTA;
+      else if (typeof edit === "string") p = hexToRgb(edit) || MAGENTA;
+      else p = palette[array[j + 1][i + 1]] || MAGENTA;
       data[o] = p.r;
       data[o + 1] = p.g;
       data[o + 2] = p.b;
@@ -62,10 +67,13 @@ export function traceRaster(raster, { detail = 60, smooth = 50, erased = null } 
     {
       pal: tracePal,
       numberofcolors: tracePal.length,
-      ltres: 0.5 + s * 3 + (1 - d) * 1.5,
-      qtres: 0.5 + s * 3 + (1 - d) * 1.5,
+      // Umbrales altos => curvas que "cortan" el efecto escalera de los bordes.
+      // Con suavizado al maximo llega muy alto para redondear fuerte.
+      ltres: 1 + s * 14 + (1 - d) * 1, // 1 .. 16
+      qtres: 1 + s * 14 + (1 - d) * 1,
       pathomit: Math.round(4 + s * 20 + (1 - d) * 24),
-      blurradius: 0,
+      // Desenfoque selectivo en el trazado para suavizar mas los bordes.
+      blurradius: Math.round(s * 5), // 0 .. 5
       scale: 1,
       roundcoords: 2,
       viewbox: true,
@@ -173,4 +181,10 @@ function extractPalette(svg) {
 function rgbToHex(r, g, b) {
   const h = (n) => n.toString(16).padStart(2, "0");
   return `#${h(r)}${h(g)}${h(b)}`;
+}
+
+function hexToRgb(hex) {
+  const m = /^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(hex);
+  if (!m) return null;
+  return { r: parseInt(m[1], 16), g: parseInt(m[2], 16), b: parseInt(m[3], 16), a: 255 };
 }

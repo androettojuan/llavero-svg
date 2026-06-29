@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { generateColorArt, DEFAULT_MODEL } from "./lib/gemini.js";
+import { generateColorArt, refineColorArt, DEFAULT_MODEL } from "./lib/gemini.js";
 import { quantizeImage, traceRaster, floodComponent } from "./lib/vectorize.js";
 import { buildModel } from "./lib/buildModel.js";
 import { export3mf } from "./lib/export3mf.js";
@@ -30,24 +30,34 @@ export default function App() {
   const [svg, setSvg] = useState("");
   const [palette, setPalette] = useState([]);
   const [raster, setRaster] = useState(null); // mapa de colores cuantizado (para editar)
-  const [erasedStrokes, setErasedStrokes] = useState([]); // pixeles borrados por clic
-  const [rebuildKey, setRebuildKey] = useState(0); // fuerza reconstruir el modelo 3D
+  const [edits, setEdits] = useState([]); // [{pixels:number[], color:hex|null}]
+  const [pending, setPending] = useState(null); // pixeles seleccionados esperando accion
+  const [editorOpen, setEditorOpen] = useState(false); // vista de edicion ampliada
   const [exaggerate, setExaggerate] = useState(false); // exagerar relieve en la vista
 
   const [detail, setDetail] = useState(60);
   const [numColors, setNumColors] = useState(4);
   const [smooth, setSmooth] = useState(50);
+  const [refine, setRefine] = useState(false); // 2da pasada de Gemini para limpiar
 
   // Parametros del modelo 3D.
   const [baseMm, setBaseMm] = useState(1); // altura de la base solida
   const [stepMm, setStepMm] = useState(0.2); // alto extra por capa de color
   const [cleanup, setCleanup] = useState(2); // quitar islas/manchas sueltas (0..100)
+  const [ringOn, setRingOn] = useState(true); // aro del llavero
+  const [ringOuter, setRingOuter] = useState(10); // diametro exterior del aro (mm)
+  const [ringHole, setRingHole] = useState(5); // diametro del agujero del aro (mm)
+  const [ringX, setRingX] = useState(0); // desplazamiento del aro en X (mm)
+  const [ringY, setRingY] = useState(0); // desplazamiento del aro en Y (mm)
+  const [ringColor, setRingColor] = useState(null); // color del aro (hex) o null=auto
+  const [ringThickness, setRingThickness] = useState(2); // espesor vertical del aro (mm)
   const [excludedColors, setExcludedColors] = useState([]); // colores tratados como fondo
   const [bgSample, setBgSample] = useState(null); // color crudo del borde {r,g,b}
 
   const [status, setStatus] = useState("idle"); // idle | generating | vectorizing
   const [error, setError] = useState("");
   const fileInput = useRef(null);
+  const opSeq = useRef(0); // descarta recuantizaciones que quedaron obsoletas
 
   // Cargar key/modelo guardados.
   useEffect(() => {
@@ -75,17 +85,18 @@ export default function App() {
     setSvg("");
     setPalette([]);
     setRaster(null);
-    setErasedStrokes([]);
+    setEdits([]);
+    setPending(null);
     setBgSample(null);
     setError("");
   }
 
-  // Conjunto de pixeles borrados (union de los clics).
-  const erasedSet = useMemo(() => {
-    const set = new Set();
-    for (const stroke of erasedStrokes) for (const p of stroke) set.add(p);
-    return set;
-  }, [erasedStrokes]);
+  // Mapa pixel -> color|null con todas las ediciones aplicadas (la ultima gana).
+  const editMap = useMemo(() => {
+    const map = new Map();
+    for (const e of edits) for (const p of e.pixels) map.set(p, e.color);
+    return map;
+  }, [edits]);
 
   // Sugerencia inicial de fondo para una paleta recien generada.
   function initialBackground(pal) {
@@ -98,10 +109,19 @@ export default function App() {
     setError("");
     setSvg("");
     setPalette([]);
-    setErasedStrokes([]);
+    setEdits([]);
+    setPending(null);
+    const myId = ++opSeq.current;
     try {
       setStatus("generating");
-      const art = await generateColorArt({ apiKey, model, file, colors: numColors });
+      let art = await generateColorArt({ apiKey, model, file, colors: numColors });
+
+      // 2da pasada (opcional): le pedimos a Gemini que limpie el MISMO arte
+      // (manteniendo el sujeto) antes de vectorizar.
+      if (refine) {
+        setStatus("refining");
+        art = await refineColorArt({ apiKey, model, imageDataUrl: art, colors: numColors });
+      }
       setArtUrl(art);
 
       // Aplanar transparencia (si la hay) para que el vectorizador no la vea negra.
@@ -141,6 +161,7 @@ export default function App() {
     setSmooth(newSmooth);
     setCleanup(newClean);
     if (!artFlatUrl) return;
+    const myId = ++opSeq.current;
     try {
       setStatus("vectorizing");
       const r = await quantizeImage(artFlatUrl, {
@@ -148,46 +169,54 @@ export default function App() {
         smooth: newSmooth,
         clean: newClean,
       });
+      if (myId !== opSeq.current) return; // quedo obsoleta: la ignoramos
       setRaster(r);
-      const out = traceRaster(r, { detail, smooth: newSmooth, erased: erasedSet });
+      const out = traceRaster(r, { detail, smooth: newSmooth, edits: editMap });
       setSvg(out.svg);
       setPalette(out.palette);
       setExcludedColors(initialBackground(out.palette));
     } catch (e) {
-      setError(e.message || String(e));
+      if (myId === opSeq.current) setError(e.message || String(e));
     } finally {
-      setStatus("idle");
+      if (myId === opSeq.current) setStatus("idle");
     }
   }
 
-  // Re-trazar (muy barato) cuando cambia el detalle o se borra una zona.
-  function reTrace({ newDetail = detail, erased = erasedSet } = {}) {
+  // Re-trazar (muy barato) cuando cambia el detalle o las ediciones.
+  function reTrace({ newDetail = detail, map = editMap } = {}) {
     setDetail(newDetail);
     if (!raster) return;
-    const out = traceRaster(raster, { detail: newDetail, smooth, erased });
+    const out = traceRaster(raster, { detail: newDetail, smooth, edits: map });
     setSvg(out.svg);
     setPalette(out.palette);
   }
 
-  // Borrar la isla de color bajo el clic (la pinta como fondo).
-  function eraseAt(px, py) {
+  // Clic en una zona: seleccionar la isla de color (sin aplicar todavia).
+  function pickAt(px, py) {
     if (!raster) return;
     const pixels = floodComponent(raster, px, py);
-    if (!pixels.length) return;
-    const nextStrokes = [...erasedStrokes, pixels];
-    setErasedStrokes(nextStrokes);
-    const set = new Set(erasedSet);
-    for (const p of pixels) set.add(p);
-    reTrace({ erased: set });
+    if (pixels.length) setPending(pixels);
   }
 
-  function undoErase() {
-    if (!erasedStrokes.length) return;
-    const nextStrokes = erasedStrokes.slice(0, -1);
-    setErasedStrokes(nextStrokes);
-    const set = new Set();
-    for (const stroke of nextStrokes) for (const p of stroke) set.add(p);
-    reTrace({ erased: set });
+  // Aplicar la accion elegida sobre la seleccion: color=null borra, hex reemplaza.
+  function applyEdit(color) {
+    if (!pending) return;
+    const next = [...edits, { pixels: pending, color }];
+    setEdits(next);
+    setPending(null);
+    const map = new Map(editMap);
+    for (const p of pending) map.set(p, color);
+    reTrace({ map });
+  }
+
+  function undoEdit() {
+    if (!edits.length) return;
+    const next = edits.slice(0, -1);
+    setEdits(next);
+    setPending(null);
+    const map = new Map();
+    for (const e of next) for (const p of e.pixels) map.set(p, e.color);
+    reTrace({ map });
   }
 
   function downloadModel() {
@@ -200,6 +229,7 @@ export default function App() {
           heightMm: HEIGHT_MM,
           order: palette,
           exclude: effectiveExcluded,
+          ring,
         })
       : model3d;
     const blob = export3mf(exportModel);
@@ -249,6 +279,20 @@ export default function App() {
   // En la vista se puede exagerar el relieve (x6) para que el orden se note;
   // el .3mf exportado usa el paso real.
   const VIEW_FACTOR = 6;
+  // Color efectivo del aro: el elegido si sigue en la paleta, si no el primero.
+  const ringColorEff =
+    ringColor && stackOrder.includes(ringColor) ? ringColor : stackOrder[0];
+  const ring = ringOn
+    ? {
+        enabled: true,
+        outer: ringOuter,
+        hole: ringHole,
+        x: ringX,
+        y: ringY,
+        color: ringColorEff,
+        thickness: ringThickness,
+      }
+    : null;
   const model3d = useMemo(() => {
     if (!svg || !palette.length) return null;
     try {
@@ -258,14 +302,41 @@ export default function App() {
         heightMm: HEIGHT_MM,
         order: palette,
         exclude: effectiveExcluded,
+        ring,
       });
     } catch (e) {
       console.error("buildModel:", e);
       return null;
     }
-  }, [svg, palette, baseMm, stepMm, exaggerate, effectiveExcluded.join(","), rebuildKey]);
+  }, [svg, palette, baseMm, stepMm, exaggerate, effectiveExcluded.join(","), ringOn, ringOuter, ringHole, ringX, ringY, ringColorEff, ringThickness]);
 
   const busy = status !== "idle";
+
+  // Barra de acciones que aparece tras seleccionar una zona (clic).
+  function renderEditBar() {
+    const colors = palette.filter((c) => !isMagentaish(c));
+    return (
+      <div className="edit-bar">
+        <span className="edit-bar-label">Con esta zona:</span>
+        <button className="danger mini" onClick={() => applyEdit(null)}>
+          Eliminar
+        </button>
+        <span className="edit-bar-label">o reemplazar:</span>
+        {colors.map((c) => (
+          <button
+            key={c}
+            className="swatch-btn"
+            style={{ background: c }}
+            title={`Reemplazar por ${c}`}
+            onClick={() => applyEdit(c)}
+          />
+        ))}
+        <button className="ghost mini" onClick={() => setPending(null)}>
+          Cancelar
+        </button>
+      </div>
+    );
+  }
 
   return (
     <div className="app">
@@ -327,6 +398,14 @@ export default function App() {
               onChange={onPickFile}
             />
             {file && <small className="filename">{file.name}</small>}
+            <label className="check">
+              <input
+                type="checkbox"
+                checked={refine}
+                onChange={(e) => setRefine(e.target.checked)}
+              />
+              <span>Refinar con Gemini (2ª pasada, limpia mejor · 2× costo)</span>
+            </label>
           </div>
 
           <h2>3. Ajustes</h2>
@@ -370,18 +449,6 @@ export default function App() {
               />
             </label>
 
-            <label className="slider">
-              <span>
-                Quitar sueltas <b>{cleanup}</b>
-              </span>
-              <input
-                type="range"
-                min="0"
-                max="100"
-                value={cleanup}
-                onChange={(e) => reQuantize({ newClean: Number(e.target.value) })}
-              />
-            </label>
             <small>
               La cantidad se pide a Gemini al generar; moverla acá recuantiza el
               SVG actual sin volver a llamar a Gemini.
@@ -467,13 +534,89 @@ export default function App() {
                   Altura total ≈ {(baseMm + stackOrder.length * stepMm).toFixed(2)} mm
                   (base {baseMm} mm + {stackOrder.length} capas).
                 </small>
-                <button
-                  className="block"
-                  onClick={() => setRebuildKey((k) => k + 1)}
-                  disabled={busy}
-                >
-                  Actualizar modelo 3D
-                </button>
+              </div>
+
+              <h2>5. Aro del llavero</h2>
+              <div className="field">
+                <label className="check">
+                  <input
+                    type="checkbox"
+                    checked={ringOn}
+                    onChange={(e) => setRingOn(e.target.checked)}
+                  />
+                  <span>Agregar aro (con agujero para la anilla)</span>
+                </label>
+                {ringOn && (
+                  <>
+                    <div className="dims">
+                      <label className="num">
+                        <span>Ø exterior (mm)</span>
+                        <input
+                          type="number"
+                          min="4"
+                          step="0.5"
+                          value={ringOuter}
+                          onChange={(e) => setRingOuter(Number(e.target.value))}
+                        />
+                      </label>
+                      <label className="num">
+                        <span>Ø agujero (mm)</span>
+                        <input
+                          type="number"
+                          min="1"
+                          step="0.5"
+                          value={ringHole}
+                          onChange={(e) => setRingHole(Number(e.target.value))}
+                        />
+                      </label>
+                      <label className="num">
+                        <span>Espesor (mm)</span>
+                        <input
+                          type="number"
+                          min="0.2"
+                          step="0.2"
+                          value={ringThickness}
+                          onChange={(e) => setRingThickness(Number(e.target.value))}
+                        />
+                      </label>
+                    </div>
+                    <div className="dims">
+                      <label className="num">
+                        <span>Posición X (mm)</span>
+                        <input
+                          type="number"
+                          step="0.5"
+                          value={ringX}
+                          onChange={(e) => setRingX(Number(e.target.value))}
+                        />
+                      </label>
+                      <label className="num">
+                        <span>Posición Y (mm)</span>
+                        <input
+                          type="number"
+                          step="0.5"
+                          value={ringY}
+                          onChange={(e) => setRingY(Number(e.target.value))}
+                        />
+                      </label>
+                    </div>
+                    <small>Posición 0,0 = arriba y centrado. X+ derecha, Y+ arriba.</small>
+                    <div className="palette">
+                      <span className="palette-label">Color del aro</span>
+                      <div className="swatches">
+                        {stackOrder.map((c) => (
+                          <button
+                            key={c}
+                            className={`swatch-btn ${c === ringColorEff ? "sel" : ""}`}
+                            style={{ background: c }}
+                            title={c}
+                            onClick={() => setRingColor(c)}
+                          />
+                        ))}
+                      </div>
+                    </div>
+                  </>
+                )}
               </div>
             </>
           )}
@@ -486,11 +629,13 @@ export default function App() {
             >
               {status === "generating"
                 ? "Generando arte…"
-                : status === "vectorizing"
-                  ? "Armando modelo…"
-                  : artUrl
-                    ? "Regenerar llavero"
-                    : "Generar llavero"}
+                : status === "refining"
+                  ? "Refinando con Gemini…"
+                  : status === "vectorizing"
+                    ? "Armando modelo…"
+                    : artUrl
+                      ? "Regenerar llavero"
+                      : "Generar llavero"}
             </button>
             <button
               className="block"
@@ -513,18 +658,39 @@ export default function App() {
             {artUrl && <img src={artUrl} alt="arte a color" />}
           </Preview>
           <Preview
-            title="Editar · clic para borrar"
+            title="Editar · clic en una zona"
             empty="Se genera al procesar"
             head={
-              erasedStrokes.length > 0 && (
-                <button className="ghost mini" onClick={undoErase} disabled={busy}>
-                  Deshacer
-                </button>
+              raster && (
+                <span className="head-actions">
+                  {edits.length > 0 && (
+                    <button className="ghost mini" onClick={undoEdit} disabled={busy}>
+                      Deshacer
+                    </button>
+                  )}
+                  <button
+                    className="ghost mini"
+                    onClick={() => {
+                      setPending(null);
+                      setEditorOpen(true);
+                    }}
+                  >
+                    Ampliar
+                  </button>
+                </span>
               )
             }
           >
             {raster && (
-              <EraseCanvas raster={raster} erased={erasedSet} onErase={eraseAt} />
+              <div className="edit-wrap">
+                <EraseCanvas
+                  raster={raster}
+                  editMap={editMap}
+                  pending={pending}
+                  onPick={pickAt}
+                />
+                {pending && renderEditBar()}
+              </div>
             )}
           </Preview>
           <Preview
@@ -548,6 +714,35 @@ export default function App() {
           </Preview>
         </section>
       </main>
+
+      {editorOpen && raster && (
+        <div className="modal-overlay" onClick={() => setEditorOpen(false)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-head">
+              <span>Editar · clic en una zona</span>
+              <span className="head-actions">
+                {edits.length > 0 && (
+                  <button className="ghost mini" onClick={undoEdit}>
+                    Deshacer
+                  </button>
+                )}
+                <button className="ghost mini" onClick={() => setEditorOpen(false)}>
+                  Cerrar
+                </button>
+              </span>
+            </div>
+            <div className="modal-body">
+              <EraseCanvas
+                raster={raster}
+                editMap={editMap}
+                pending={pending}
+                onPick={pickAt}
+              />
+            </div>
+            {pending && renderEditBar()}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
